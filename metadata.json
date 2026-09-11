@@ -1,0 +1,6 @@
+{
+  "name": "Raphajoy Chemist & Pharmacy POS System",
+  "description": "Raphajoy Chemist and Pharmacy POS and Stock Management System with Admin and Cashier roles, prescription handling, inventory tracking, sales tracking, and end-of-day closing.",
+  "requestFramePermissions": ["bluetooth", "usb"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
