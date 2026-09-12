@@ -71,7 +71,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
     }
   };
 
-  const hotelName = (() => {
+  const pharmacyName = (() => {
     try {
       const cached = localStorage.getItem('bar_pos_business_config');
       if (cached) {
@@ -90,7 +90,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
     const cleanEmail = email.trim().toLowerCase();
 
     if (cleanEmail === 'cashier@barpos.com') {
-      setError('The default demo cashier has been removed. Please log in with your active cashier credentials (e.g. atieno@kimuchu.com).');
+      setError('The default demo cashier has been removed. Please log in with your active cashier credentials (e.g. atieno@raphajoy.com).');
       setLoading(false);
       return;
     }
@@ -142,7 +142,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
     // 3. Fallback profile creation for known email patterns or custom credentials
     const isOwner = cleanEmail.includes('owner') || cleanEmail.includes('admin');
     const role: 'admin' | 'cashier' = isOwner ? 'admin' : 'cashier';
-    const name = isOwner ? 'Hotel Owner' : 'Cashier';
+    const name = isOwner ? 'Pharmacy Owner' : 'Cashier';
 
     const fallbackProfile: UserProfile = {
       uid: 'user-' + Date.now(),
@@ -201,7 +201,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
           <div className="mx-auto w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mb-3 shadow-inner">
             <Pill className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">{hotelName}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{pharmacyName}</h1>
           <p className="text-emerald-100 text-xs mt-1">Chemist & Pharmacy POS & Stock Management</p>
         </div>
 

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, BusinessConfig, Product, SaleItem, Sale, PaymentMethod } from '../../types';
 import { db, DEFAULT_BUSINESS_ID } from '../../lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { formatCurrency, logAuditAction } from '../../lib/utils';
 import {
   Search,
@@ -17,9 +17,20 @@ import {
   CircleDollarSign,
   ArrowLeft,
   X,
-  Printer
+  Printer,
+  Barcode,
+  Camera,
+  Volume2,
+  Sparkles,
+  Zap,
+  Keyboard,
+  RefreshCw,
+  Check
 } from 'lucide-react';
 import { ReceiptModal } from '../common/ReceiptModal';
+import { CameraBarcodeScannerModal } from '../common/CameraBarcodeScannerModal';
+import { UnknownBarcodeModal } from '../common/UnknownBarcodeModal';
+import { playAudioBeep } from '../../lib/barcodeUtils';
 import {
   saveSaleLocallyAndQueue,
   cacheLocalProducts,
@@ -35,12 +46,34 @@ interface RecordSaleViewProps {
 }
 
 export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
+  const businessId = user.businessId || DEFAULT_BUSINESS_ID;
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [cart, setCart] = useState<SaleItem[]>([]);
   
+  // Barcode Scanning State
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [scanMode, setScanMode] = useState<'barcode' | 'search'>('barcode');
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
+  const [unknownBarcode, setUnknownBarcode] = useState<string | null>(null);
+  const [lastScannedProductId, setLastScannedProductId] = useState<string | null>(null);
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
+  
+  // Quick Product Create modal state (from unknown barcode)
+  const [showQuickCreateModal, setShowQuickCreateModal] = useState(false);
+  const [quickCreateBarcode, setQuickCreateBarcode] = useState('');
+  const [quickCreateName, setQuickCreateName] = useState('');
+  const [quickCreatePrice, setQuickCreatePrice] = useState('');
+  const [quickCreateStock, setQuickCreateStock] = useState('50');
+  const [quickCreateCategory, setQuickCreateCategory] = useState('');
+
+  // Refs for auto-focus & hardware scanning
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const tenderedInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   // Payment states
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [amountTendered, setAmountTendered] = useState<string>('');
@@ -59,6 +92,81 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
   const [orderReceiptSale, setOrderReceiptSale] = useState<Sale | null>(null);
   const [openTabs, setOpenTabs] = useState<Sale[]>([]);
   const [showOpenTabsModal, setShowOpenTabsModal] = useState(false);
+
+  // Automatically focus the barcode input when POS opens
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Keyboard Shortcuts (F2, F4, ESC) & Global USB/Bluetooth HID Barcode listener
+  useEffect(() => {
+    let scanBuffer = '';
+    let lastKeyTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Shortcut: F2 focuses Barcode/Search Input
+      if (e.key === 'F2') {
+        e.preventDefault();
+        barcodeInputRef.current?.focus();
+        barcodeInputRef.current?.select();
+        return;
+      }
+
+      // Shortcut: F4 switches to Payment and focuses Tendered amount
+      if (e.key === 'F4') {
+        e.preventDefault();
+        setMobileView('payment');
+        setTimeout(() => {
+          tenderedInputRef.current?.focus();
+          tenderedInputRef.current?.select();
+        }, 100);
+        return;
+      }
+
+      // Shortcut: ESC closes modals
+      if (e.key === 'Escape') {
+        if (showCameraScanner) setShowCameraScanner(false);
+        if (unknownBarcode) setUnknownBarcode(null);
+        if (showQuickCreateModal) setShowQuickCreateModal(false);
+        if (showCustomModal) setShowCustomModal(false);
+        if (showOpenTabsModal) setShowOpenTabsModal(false);
+        return;
+      }
+
+      // Check if user is typing in another regular text field
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      const isInputActive = activeTag === 'input' || activeTag === 'textarea';
+      const isBarcodeInput = document.activeElement === barcodeInputRef.current;
+
+      // If typing in another input (like custom name or tendered amount), do not intercept
+      if (isInputActive && !isBarcodeInput) {
+        return;
+      }
+
+      // Hardware Barcode Scanner detection via rapid key sequence (< 60ms between characters)
+      const now = Date.now();
+      if (now - lastKeyTime > 75) {
+        scanBuffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        if (scanBuffer.length >= 3) {
+          e.preventDefault();
+          processBarcodeScan(scanBuffer.trim());
+          scanBuffer = '';
+        }
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        scanBuffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [products, cart, showCameraScanner, unknownBarcode, showQuickCreateModal]);
 
   useEffect(() => {
     try {
@@ -137,7 +245,7 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
     }
 
     try {
-      const prodRef = collection(db, 'businesses', DEFAULT_BUSINESS_ID, 'products');
+      const prodRef = collection(db, 'businesses', businessId, 'products');
       const prodSnap = await getDocs(prodRef);
       const prods: Product[] = [];
       prodSnap.forEach(d => {
@@ -148,7 +256,7 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
         cacheLocalProducts(prods);
       }
 
-      const catRef = collection(db, 'businesses', DEFAULT_BUSINESS_ID, 'categories');
+      const catRef = collection(db, 'businesses', businessId, 'categories');
       const catSnap = await getDocs(catRef);
       const cats: { id: string; name: string }[] = [];
       catSnap.forEach(d => {
@@ -163,11 +271,18 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
     }
   }
 
-  const addToCart = (product: Product, delta: number = 1) => {
+  const addToCart = (product: Product, delta: number = 1): boolean => {
     setError('');
     const existingIndex = cart.findIndex(item => item.productId === product.id);
     const currentQtyInCart = existingIndex >= 0 ? cart[existingIndex].quantity : 0;
     const requestedQty = currentQtyInCart + delta;
+
+    // Check stock availability
+    if (delta > 0 && product.currentStock !== undefined && requestedQty > product.currentStock) {
+      playAudioBeep('error');
+      setError(`Insufficient stock for "${product.name}". Available: ${product.currentStock}, In Cart: ${currentQtyInCart}`);
+      return false;
+    }
 
     if (requestedQty <= 0) {
       if (existingIndex >= 0) {
@@ -175,7 +290,7 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
         newCart.splice(existingIndex, 1);
         setCart(newCart);
       }
-      return;
+      return true;
     }
 
     if (existingIndex >= 0) {
@@ -189,11 +304,190 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
         {
           productId: product.id,
           productName: product.name,
+          barcode: product.barcode,
           quantity: 1,
           unitPrice: product.sellingPrice,
           totalAmount: product.sellingPrice
         }
       ]);
+    }
+    return true;
+  };
+
+  // Process Barcode Scan (from Hardware Scanner, Camera, or Manual Entry)
+  const processBarcodeScan = (scannedCode: string) => {
+    const code = scannedCode != null ? String(scannedCode).trim() : '';
+    if (!code) return;
+
+    // Search tenant products by Barcode or fallback ID
+    const product = products.find(p =>
+      p.barcode && String(p.barcode).trim().toLowerCase() === code.toLowerCase()
+    ) || products.find(p => p.id.toLowerCase() === code.toLowerCase());
+
+    if (!product) {
+      playAudioBeep('error');
+      setUnknownBarcode(code);
+      setScanFeedback({
+        type: 'error',
+        message: `Barcode "${code}" not found in catalog.`
+      });
+      return;
+    }
+
+    // Check if out of stock
+    if (product.currentStock !== undefined && product.currentStock <= 0) {
+      playAudioBeep('error');
+      setScanFeedback({
+        type: 'error',
+        message: `Out of Stock: "${product.name}" has 0 stock remaining!`
+      });
+      return;
+    }
+
+    const inCart = cart.find(i => i.productId === product.id);
+    const curQty = inCart ? inCart.quantity : 0;
+    if (product.currentStock !== undefined && curQty + 1 > product.currentStock) {
+      playAudioBeep('error');
+      setScanFeedback({
+        type: 'warning',
+        message: `Stock limit reached: only ${product.currentStock} units available for "${product.name}".`
+      });
+      return;
+    }
+
+    // Add to cart or increase quantity
+    const added = addToCart(product, 1);
+    if (added) {
+      playAudioBeep('success');
+      setLastScannedProductId(product.id);
+      setScanFeedback({
+        type: 'success',
+        message: `Scanned & Added: "${product.name}" (${formatCurrency(product.sellingPrice, currency)})`
+      });
+
+      // Clear scan highlight after 2.5 seconds
+      setTimeout(() => {
+        setLastScannedProductId(null);
+      }, 2500);
+
+      // Clear feedback message after 3.5 seconds
+      setTimeout(() => {
+        setScanFeedback(null);
+      }, 3500);
+
+      // Re-focus barcode input for rapid continuous scanning
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 50);
+    }
+  };
+
+  const handleBarcodeSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const code = barcodeInput.trim();
+    if (!code) return;
+    processBarcodeScan(code);
+    setBarcodeInput('');
+  };
+
+  // Quick-Assign Barcode to an Existing Product
+  const handleAssignBarcodeToProduct = async (productId: string, barcodeToAssign: string) => {
+    try {
+      const prodRef = doc(db, 'businesses', businessId, 'products', productId);
+      await updateDoc(prodRef, {
+        barcode: barcodeToAssign,
+        barcodeType: 'CODE128',
+        updatedAt: new Date().toISOString()
+      });
+
+      const updated = products.map(p =>
+        p.id === productId ? { ...p, barcode: barcodeToAssign, barcodeType: 'CODE128' as const } : p
+      );
+      setProducts(updated);
+      cacheLocalProducts(updated);
+
+      const target = updated.find(p => p.id === productId);
+      if (target) {
+        addToCart(target, 1);
+        playAudioBeep('success');
+        setScanFeedback({
+          type: 'success',
+          message: `Barcode assigned to "${target.name}" and added to cart!`
+        });
+      }
+      setUnknownBarcode(null);
+    } catch (err) {
+      console.error("Failed to assign barcode:", err);
+      // Local fallback
+      const updated = products.map(p =>
+        p.id === productId ? { ...p, barcode: barcodeToAssign } : p
+      );
+      setProducts(updated);
+      cacheLocalProducts(updated);
+      const target = updated.find(p => p.id === productId);
+      if (target) {
+        addToCart(target, 1);
+        playAudioBeep('success');
+      }
+      setUnknownBarcode(null);
+    }
+  };
+
+  // Quick Create Product with Scanned Barcode
+  const handleQuickCreateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const priceNum = parseFloat(quickCreatePrice);
+    if (!quickCreateName.trim() || isNaN(priceNum) || priceNum <= 0) {
+      setError('Please enter a valid product name and selling price.');
+      return;
+    }
+
+    try {
+      const newId = 'prod-' + Date.now();
+      const cat = categories.find(c => c.id === quickCreateCategory) || categories[0];
+      const stockNum = parseInt(quickCreateStock) || 50;
+
+      const newProd: Product = {
+        id: newId,
+        name: quickCreateName.trim(),
+        barcode: quickCreateBarcode.trim(),
+        barcodeType: 'CODE128',
+        categoryId: cat?.id || 'cat-general',
+        categoryName: cat?.name || 'General',
+        unitType: 'Pack',
+        buyingPrice: Math.round(priceNum * 0.7),
+        sellingPrice: priceNum,
+        openingStock: stockNum,
+        currentStock: stockNum,
+        stockAdded: 0,
+        minStockLevel: 10,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      try {
+        await setDoc(doc(db, 'businesses', businessId, 'products', newId), newProd);
+      } catch (err) {
+        console.warn("Firestore save deferred:", err);
+      }
+
+      const updated = [newProd, ...products];
+      setProducts(updated);
+      cacheLocalProducts(updated);
+
+      addToCart(newProd, 1);
+      playAudioBeep('success');
+      setShowQuickCreateModal(false);
+      setQuickCreateBarcode('');
+      setQuickCreateName('');
+      setQuickCreatePrice('');
+      setScanFeedback({
+        type: 'success',
+        message: `Created "${newProd.name}" and added to cart!`
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to create product');
     }
   };
 
@@ -296,7 +590,7 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
       };
 
       // 1. Instantly persist locally & queue for sync (ensures 100% offline-first reliability)
-      saveSaleLocallyAndQueue(completedSale);
+      saveSaleLocallyAndQueue(completedSale, businessId);
 
       // 2. Immediately update in-memory products state with deducted stock so UI reflects sold units
       const updatedLocalProds = getLocalCachedProducts();
@@ -321,7 +615,7 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
       ).catch(() => {});
 
       if (typeof navigator !== 'undefined' && navigator.onLine) {
-        syncOfflineQueue().catch((syncErr) => {
+        syncOfflineQueue(businessId).catch((syncErr) => {
           console.warn('Background sync deferred:', syncErr);
         });
       }
@@ -347,6 +641,174 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
 
   return (
     <div className="space-y-4 pb-28 lg:pb-6">
+      {/* ================= PROMINENT POS BARCODE SCANNING & SEARCH STATION ================= */}
+      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-3.5 sm:p-4 text-white shadow-lg border border-slate-700/80">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          
+          {/* Mode Selector & Status Indicators */}
+          <div className="flex items-center justify-between lg:justify-start gap-2.5">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
+                <Barcode className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-black tracking-wide text-white uppercase">
+                    {scanMode === 'barcode' ? 'Barcode Scan Station' : 'Manual Catalog Search'}
+                  </span>
+                  <span className="flex items-center text-[10px] font-bold text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1.5"></span>
+                    Scanner Ready
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 hidden sm:block">
+                  Auto-adds to cart via USB / Bluetooth scanner, camera or typing
+                </p>
+              </div>
+            </div>
+
+            {/* Mode Switch Toggle */}
+            <div className="flex bg-slate-950/80 rounded-xl p-0.5 border border-slate-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setScanMode('barcode');
+                  setTimeout(() => barcodeInputRef.current?.focus(), 50);
+                }}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
+                  scanMode === 'barcode'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Barcode className="w-3.5 h-3.5" />
+                <span>Barcode</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScanMode('search');
+                  setTimeout(() => searchInputRef.current?.focus(), 50);
+                }}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center space-x-1.5 cursor-pointer ${
+                  scanMode === 'search'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Search</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Center Input Box */}
+          <div className="flex-1 max-w-2xl">
+            {scanMode === 'barcode' ? (
+              <form onSubmit={handleBarcodeSubmit} className="relative flex items-center">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-emerald-400">
+                  <Barcode className="w-5 h-5" />
+                </div>
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  placeholder="Scan barcode (USB/Bluetooth) or type & press Enter..."
+                  className="w-full pl-11 pr-24 py-2.5 rounded-xl bg-slate-950 border-2 border-emerald-500/70 focus:border-emerald-400 text-sm font-mono font-bold text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 transition-all shadow-inner"
+                  autoComplete="off"
+                />
+                <div className="absolute inset-y-0 right-1.5 flex items-center space-x-1">
+                  {barcodeInput && (
+                    <button
+                      type="button"
+                      onClick={() => setBarcodeInput('')}
+                      className="p-1 rounded-md text-slate-400 hover:text-white"
+                      title="Clear"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+                  >
+                    Scan
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="relative flex items-center">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-emerald-400">
+                  <Search className="w-5 h-5" />
+                </div>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search medicines, vitamins or supplies..."
+                  className="w-full pl-11 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-700 focus:border-emerald-400 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 transition-all"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right Action: Camera Scanner + Shortcuts */}
+          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowCameraScanner(true)}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-600 text-xs font-bold transition-all flex items-center space-x-2 shadow-xs cursor-pointer"
+              title="Open device camera to scan barcodes"
+            >
+              <Camera className="w-4 h-4 text-emerald-400" />
+              <span>Camera Scanner</span>
+            </button>
+
+            <div className="hidden xl:flex items-center space-x-1.5 text-[11px] text-slate-400 bg-slate-950/60 px-2.5 py-1.5 rounded-xl border border-slate-800">
+              <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px] font-bold border border-slate-700">F2</kbd>
+              <span>Scan</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px] font-bold border border-slate-700 ml-1">F4</kbd>
+              <span>Pay</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Real-time Scan Notification Alert */}
+        {scanFeedback && (
+          <div className={`mt-3 py-2 px-3.5 rounded-xl text-xs font-bold flex items-center justify-between transition-all ${
+            scanFeedback.type === 'success'
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
+              : scanFeedback.type === 'warning'
+              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs'
+              : 'bg-red-500/20 text-red-300 border border-red-500/40 shadow-xs'
+          }`}>
+            <div className="flex items-center space-x-2">
+              {scanFeedback.type === 'success' && <Check className="w-4 h-4 text-emerald-400" />}
+              {scanFeedback.type === 'warning' && <AlertCircle className="w-4 h-4 text-amber-400" />}
+              {scanFeedback.type === 'error' && <AlertCircle className="w-4 h-4 text-red-400" />}
+              <span>{scanFeedback.message}</span>
+            </div>
+            <button
+              onClick={() => setScanFeedback(null)}
+              className="p-1 hover:opacity-75 transition-opacity"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Mobile Top Segment Switcher (Catalog vs Cart & Payment) */}
       <div className="lg:hidden flex rounded-2xl bg-slate-900 p-1.5 shadow-md sticky top-16 z-30">
         <button
@@ -387,7 +849,7 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search drinks or cigarettes..."
+                placeholder="Filter catalog by medicine name, barcode or category..."
                 className="w-full rounded-xl border border-gray-300 bg-white py-3 pl-11 pr-4 text-sm text-gray-900 placeholder-gray-400 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 shadow-xs"
               />
             </div>
@@ -566,49 +1028,66 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
                   </button>
                 </div>
               ) : (
-                cart.map((item) => (
-                  <div key={item.productId} className="flex items-center justify-between p-2.5 rounded-2xl bg-gray-50 border border-gray-100">
-                    <div className="flex-1 pr-2">
-                      <h5 className="font-semibold text-gray-900 text-xs sm:text-sm">{item.productName}</h5>
-                      <p className="text-[11px] text-gray-500">{formatCurrency(item.unitPrice, currency)} each</p>
-                    </div>
-
-                    <div className="flex items-center space-x-1.5">
-                      <div className="flex items-center space-x-1 border border-gray-300 rounded-lg bg-white px-1 py-0.5">
-                        <button
-                          onClick={() => updateCartQty(item.productId, item.quantity - 1)}
-                          className="p-1 text-gray-600 hover:text-red-600"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) => updateCartQty(item.productId, parseInt(e.target.value) || 0)}
-                          className="w-8 text-center font-bold text-xs focus:outline-none"
-                        />
-                        <button
-                          onClick={() => updateCartQty(item.productId, item.quantity + 1)}
-                          className="p-1 text-gray-600 hover:text-emerald-600"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
+                cart.map((item) => {
+                  const isJustScanned = lastScannedProductId === item.productId;
+                  return (
+                    <div
+                      key={item.productId}
+                      className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all ${
+                        isJustScanned
+                          ? 'bg-emerald-100/90 border-emerald-500 ring-2 ring-emerald-400 scale-[1.01] shadow-xs'
+                          : 'bg-gray-50 border-gray-100 hover:bg-gray-100/60'
+                      }`}
+                    >
+                      <div className="flex-1 pr-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h5 className="font-semibold text-gray-900 text-xs sm:text-sm">{item.productName}</h5>
+                          {item.barcode && (
+                            <span className="inline-flex items-center text-[10px] font-mono text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded font-semibold border border-emerald-200">
+                              #{item.barcode}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-500">{formatCurrency(item.unitPrice, currency)} each</p>
                       </div>
 
-                      <span className="font-extrabold text-xs sm:text-sm text-gray-900 w-16 text-right">
-                        {formatCurrency(item.totalAmount, currency)}
-                      </span>
+                      <div className="flex items-center space-x-1.5">
+                        <div className="flex items-center space-x-1 border border-gray-300 rounded-lg bg-white px-1 py-0.5">
+                          <button
+                            onClick={() => updateCartQty(item.productId, item.quantity - 1)}
+                            className="p-1 text-gray-600 hover:text-red-600"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => updateCartQty(item.productId, parseInt(e.target.value) || 0)}
+                            className="w-8 text-center font-bold text-xs focus:outline-none"
+                          />
+                          <button
+                            onClick={() => updateCartQty(item.productId, item.quantity + 1)}
+                            className="p-1 text-gray-600 hover:text-emerald-600"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
 
-                      <button
-                        onClick={() => removeFromCart(item.productId)}
-                        className="p-1 text-gray-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        <span className="font-extrabold text-xs sm:text-sm text-gray-900 w-16 text-right">
+                          {formatCurrency(item.totalAmount, currency)}
+                        </span>
+
+                        <button
+                          onClick={() => removeFromCart(item.productId)}
+                          className="p-1 text-gray-400 hover:text-red-600"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -696,6 +1175,7 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
                     {currency}
                   </span>
                   <input
+                    ref={tenderedInputRef}
                     type="number"
                     min="0"
                     step="any"
@@ -1011,6 +1491,150 @@ export function RecordSaleView({ user, businessConfig }: RecordSaleViewProps) {
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Camera Barcode Scanner Modal */}
+      {showCameraScanner && (
+        <CameraBarcodeScannerModal
+          onScan={(code) => {
+            processBarcodeScan(code);
+            setShowCameraScanner(false);
+          }}
+          onClose={() => setShowCameraScanner(false)}
+        />
+      )}
+
+      {/* Unknown Barcode Modal */}
+      {unknownBarcode && (
+        <UnknownBarcodeModal
+          scannedBarcode={unknownBarcode}
+          products={products}
+          onClose={() => setUnknownBarcode(null)}
+          onSearchManual={() => {
+            setScanMode('search');
+            setSearchQuery(unknownBarcode);
+            setUnknownBarcode(null);
+            setTimeout(() => searchInputRef.current?.focus(), 100);
+          }}
+          onAssignToExisting={(productId, code) => {
+            handleAssignBarcodeToProduct(productId, code);
+          }}
+          onCreateNew={(code) => {
+            setQuickCreateBarcode(code);
+            setQuickCreateName('');
+            setQuickCreatePrice('');
+            setQuickCreateStock('50');
+            setQuickCreateCategory(categories[0]?.id || '');
+            setUnknownBarcode(null);
+            setShowQuickCreateModal(true);
+          }}
+        />
+      )}
+
+      {/* Quick Add Product with Scanned Barcode Modal */}
+      {showQuickCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-black">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900">Quick-Add Product</h3>
+                  <p className="text-xs text-gray-500">Create item and add directly to cart</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowQuickCreateModal(false)}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickCreateProduct} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Pre-filled Barcode</label>
+                <div className="flex items-center space-x-2 px-3 py-2 bg-gray-100 border border-gray-300 rounded-xl font-mono text-xs font-bold text-gray-800">
+                  <Barcode className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{quickCreateBarcode}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Medicine / Product Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Panadol Extra 500mg (16s)"
+                  value={quickCreateName}
+                  onChange={(e) => setQuickCreateName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Selling Price ({currency}) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    required
+                    placeholder="e.g. 150"
+                    value={quickCreatePrice}
+                    onChange={(e) => setQuickCreatePrice(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm font-black focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Initial Stock Qty</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={quickCreateStock}
+                    onChange={(e) => setQuickCreateStock(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {categories.length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Category</label>
+                  <select
+                    value={quickCreateCategory}
+                    onChange={(e) => setQuickCreateCategory(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickCreateModal(false)}
+                  className="px-4 py-2.5 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  Save & Add to Cart
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

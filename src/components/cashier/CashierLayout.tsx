@@ -36,7 +36,7 @@ export function CashierLayout({ user, businessConfig, activeTab, setActiveTab, o
     } catch (e) {
       setAvailableCashiers([
         user,
-        { uid: 'cashier-1', name: 'Kimani', email: 'kimani@hotelpos.com', role: 'cashier', status: 'active', businessId: 'default' }
+        { uid: 'cashier-1', name: 'Kimani', email: 'kimani@raphajoy.com', role: 'cashier', status: 'active', businessId: 'default' }
       ]);
     }
   }, [user]);

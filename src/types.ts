@@ -24,6 +24,7 @@ export interface BusinessConfig {
   receiptHeader?: string;
   receiptFooter?: string;
   tillNumber?: string;
+  allowNegativeStock?: boolean;
 }
 
 export interface Category {
@@ -37,6 +38,8 @@ export interface Product {
   name: string;
   categoryId: string;
   categoryName: string;
+  barcode?: string;
+  barcodeType?: 'CODE128' | 'EAN13' | 'UPC' | string;
   unitType: 'Bottle' | 'Can' | 'Glass' | 'Crate' | 'Piece' | 'Shot' | 'Packet' | 'Night' | 'Plate' | 'Cup' | 'Session' | string;
   buyingPrice?: number;
   sellingPrice: number;
@@ -52,6 +55,7 @@ export interface Product {
 export interface SaleItem {
   productId: string;
   productName: string;
+  barcode?: string;
   quantity: number;
   unitPrice: number;
   totalAmount: number;

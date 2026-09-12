@@ -92,15 +92,15 @@ export function cacheLocalProducts(products: Product[]) {
 
 const DEFAULT_FALLBACK_PRODUCTS: Product[] = [
   {
-    id: 'prod-tusker',
-    name: 'Tusker Lager (500ml)',
-    categoryId: 'cat-beer',
-    categoryName: 'Beer',
-    unitType: 'Bottle',
-    buyingPrice: 180,
-    sellingPrice: 250,
-    openingStock: 120,
-    currentStock: 120,
+    id: 'prod-paracetamol',
+    name: 'Paracetamol 500mg Tablets (Pack of 100)',
+    categoryId: 'cat-pain',
+    categoryName: 'Analgesics & Pain Relief',
+    unitType: 'Pack',
+    buyingPrice: 250,
+    sellingPrice: 450,
+    openingStock: 100,
+    currentStock: 100,
     stockAdded: 0,
     minStockLevel: 15,
     status: 'active',
@@ -108,13 +108,13 @@ const DEFAULT_FALLBACK_PRODUCTS: Product[] = [
     updatedAt: new Date().toISOString()
   },
   {
-    id: 'prod-whitecap',
-    name: 'White Cap Lager',
-    categoryId: 'cat-beer',
-    categoryName: 'Beer',
-    unitType: 'Bottle',
-    buyingPrice: 180,
-    sellingPrice: 250,
+    id: 'prod-ibuprofen',
+    name: 'Ibuprofen 400mg Tablets (Box of 50)',
+    categoryId: 'cat-pain',
+    categoryName: 'Analgesics & Pain Relief',
+    unitType: 'Box',
+    buyingPrice: 350,
+    sellingPrice: 600,
     openingStock: 80,
     currentStock: 80,
     stockAdded: 0,
@@ -124,13 +124,13 @@ const DEFAULT_FALLBACK_PRODUCTS: Product[] = [
     updatedAt: new Date().toISOString()
   },
   {
-    id: 'prod-guinness',
-    name: 'Guinness Stout',
-    categoryId: 'cat-beer',
-    categoryName: 'Beer',
-    unitType: 'Bottle',
-    buyingPrice: 220,
-    sellingPrice: 300,
+    id: 'prod-amoxicillin',
+    name: 'Amoxicillin 500mg Capsules (Box of 100)',
+    categoryId: 'cat-prescription',
+    categoryName: 'Prescription Drugs (Rx)',
+    unitType: 'Box',
+    buyingPrice: 800,
+    sellingPrice: 1400,
     openingStock: 60,
     currentStock: 60,
     stockAdded: 0,
@@ -140,15 +140,15 @@ const DEFAULT_FALLBACK_PRODUCTS: Product[] = [
     updatedAt: new Date().toISOString()
   },
   {
-    id: 'prod-heineken',
-    name: 'Heineken',
-    categoryId: 'cat-beer',
-    categoryName: 'Beer',
-    unitType: 'Bottle',
-    buyingPrice: 250,
-    sellingPrice: 350,
-    openingStock: 40,
-    currentStock: 40,
+    id: 'prod-augmentin',
+    name: 'Augmentin 625mg Tablets (Strip of 14)',
+    categoryId: 'cat-prescription',
+    categoryName: 'Prescription Drugs (Rx)',
+    unitType: 'Strip',
+    buyingPrice: 650,
+    sellingPrice: 1100,
+    openingStock: 45,
+    currentStock: 45,
     stockAdded: 0,
     minStockLevel: 8,
     status: 'active',
@@ -156,29 +156,13 @@ const DEFAULT_FALLBACK_PRODUCTS: Product[] = [
     updatedAt: new Date().toISOString()
   },
   {
-    id: 'prod-smirnoff',
-    name: 'Smirnoff Vodka (750ml)',
-    categoryId: 'cat-spirits',
-    categoryName: 'Spirits',
+    id: 'prod-benylin',
+    name: 'Benylin Chesty Cough Syrup 100ml',
+    categoryId: 'cat-cold',
+    categoryName: 'Cold, Flu & Cough',
     unitType: 'Bottle',
-    buyingPrice: 1200,
-    sellingPrice: 1800,
-    openingStock: 25,
-    currentStock: 25,
-    stockAdded: 0,
-    minStockLevel: 5,
-    status: 'active',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'prod-chrome',
-    name: 'Chrome Vodka (250ml)',
-    categoryId: 'cat-spirits',
-    categoryName: 'Spirits',
-    unitType: 'Bottle',
-    buyingPrice: 350,
-    sellingPrice: 500,
+    buyingPrice: 300,
+    sellingPrice: 550,
     openingStock: 50,
     currentStock: 50,
     stockAdded: 0,
@@ -188,33 +172,81 @@ const DEFAULT_FALLBACK_PRODUCTS: Product[] = [
     updatedAt: new Date().toISOString()
   },
   {
-    id: 'prod-jw-black',
-    name: 'Johnnie Walker Black Label',
-    categoryId: 'cat-spirits',
-    categoryName: 'Spirits',
-    unitType: 'Bottle',
-    buyingPrice: 2800,
-    sellingPrice: 4000,
-    openingStock: 15,
-    currentStock: 15,
+    id: 'prod-panadol-cold',
+    name: 'Panadol Cold & Flu Relief (Pack of 20)',
+    categoryId: 'cat-cold',
+    categoryName: 'Cold, Flu & Cough',
+    unitType: 'Pack',
+    buyingPrice: 180,
+    sellingPrice: 320,
+    openingStock: 90,
+    currentStock: 90,
     stockAdded: 0,
-    minStockLevel: 3,
+    minStockLevel: 20,
     status: 'active',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   },
   {
-    id: 'prod-coke',
-    name: 'Coca Cola (Soda 300ml)',
-    categoryId: 'cat-soft',
-    categoryName: 'Soft Drinks',
+    id: 'prod-centrum',
+    name: 'Centrum Multivitamin Tablets (Bottle of 60)',
+    categoryId: 'cat-vitamins',
+    categoryName: 'Vitamins & Supplements',
     unitType: 'Bottle',
-    buyingPrice: 60,
-    sellingPrice: 100,
-    openingStock: 100,
-    currentStock: 100,
+    buyingPrice: 1200,
+    sellingPrice: 1950,
+    openingStock: 35,
+    currentStock: 35,
     stockAdded: 0,
-    minStockLevel: 20,
+    minStockLevel: 5,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'prod-vitaminc',
+    name: 'Vitamin C 1000mg Effervescent (Tube of 20)',
+    categoryId: 'cat-vitamins',
+    categoryName: 'Vitamins & Supplements',
+    unitType: 'Tube',
+    buyingPrice: 400,
+    sellingPrice: 700,
+    openingStock: 40,
+    currentStock: 40,
+    stockAdded: 0,
+    minStockLevel: 10,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'prod-firstaid-kit',
+    name: 'First Aid Emergency Kit Box',
+    categoryId: 'cat-firstaid',
+    categoryName: 'First Aid & Wound Care',
+    unitType: 'Piece',
+    buyingPrice: 1500,
+    sellingPrice: 2500,
+    openingStock: 25,
+    currentStock: 25,
+    stockAdded: 0,
+    minStockLevel: 5,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'prod-bp-monitor',
+    name: 'Automatic Upper Arm Blood Pressure Monitor',
+    categoryId: 'cat-devices',
+    categoryName: 'Medical Devices & Equipment',
+    unitType: 'Piece',
+    buyingPrice: 3500,
+    sellingPrice: 5800,
+    openingStock: 12,
+    currentStock: 12,
+    stockAdded: 0,
+    minStockLevel: 3,
     status: 'active',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -222,22 +254,32 @@ const DEFAULT_FALLBACK_PRODUCTS: Product[] = [
 ];
 
 const DEFAULT_FALLBACK_CATEGORIES = [
-  { id: 'cat-beer', name: 'Beer' },
-  { id: 'cat-spirits', name: 'Spirits' },
-  { id: 'cat-soft', name: 'Soft Drinks' },
-  { id: 'cat-cider', name: 'Ciders' }
+  { id: 'cat-prescription', name: 'Prescription Drugs (Rx)' },
+  { id: 'cat-pain', name: 'Analgesics & Pain Relief' },
+  { id: 'cat-cold', name: 'Cold, Flu & Cough' },
+  { id: 'cat-vitamins', name: 'Vitamins & Supplements' },
+  { id: 'cat-firstaid', name: 'First Aid & Wound Care' },
+  { id: 'cat-devices', name: 'Medical Devices & Equipment' }
 ];
 
 export function getLocalCachedProducts(): Product[] {
   try {
     const stored = JSON.parse(localStorage.getItem('bar_pos_local_products') || '[]');
     if (Array.isArray(stored) && stored.length > 0) {
-      return stored;
+      // Check if stored contains obsolete bar items like tusker/beer
+      const hasObsolete = stored.some(p => {
+        const n = (p.name || '').toLowerCase();
+        return n.includes('tusker') || n.includes('beer') || n.includes('smirnoff') || n.includes('guinness');
+      });
+      if (!hasObsolete) {
+        return stored;
+      }
+      localStorage.removeItem('bar_pos_local_products');
     }
   } catch (e) {
     // fallback
   }
-  // Initialize with fallback products if cache is empty
+  // Initialize with fallback pharmacy products if cache is empty or obsolete
   cacheLocalProducts(DEFAULT_FALLBACK_PRODUCTS);
   return DEFAULT_FALLBACK_PRODUCTS;
 }
@@ -285,7 +327,7 @@ export function deductLocalProductStock(items: { productId: string; quantity: nu
 /**
  * Store sale locally and queue for sync
  */
-export function saveSaleLocallyAndQueue(sale: Sale) {
+export function saveSaleLocallyAndQueue(sale: Sale, businessId: string = DEFAULT_BUSINESS_ID) {
   // 1. Save to local sales history
   try {
     const localSales: Sale[] = JSON.parse(localStorage.getItem('bar_pos_local_sales') || '[]');
@@ -313,7 +355,7 @@ export function saveSaleLocallyAndQueue(sale: Sale) {
 /**
  * Synchronize all pending sales to Firestore
  */
-export async function syncOfflineQueue(): Promise<{ syncedCount: number; errors: number }> {
+export async function syncOfflineQueue(businessId: string = DEFAULT_BUSINESS_ID): Promise<{ syncedCount: number; errors: number }> {
   if (isSyncing) {
     return { syncedCount: 0, errors: 0 };
   }
@@ -337,17 +379,35 @@ export async function syncOfflineQueue(): Promise<{ syncedCount: number; errors:
   for (const sale of queue) {
     try {
       // 1. Upload sale document
-      const saleRef = doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'sales', sale.id);
+      const saleRef = doc(db, 'businesses', businessId, 'sales', sale.id);
       await setDoc(saleRef, sale, { merge: true });
 
-      // 2. Update stock in Firestore for inventory items
+      // 2. Update stock in Firestore for inventory items & record inventory movement
       for (const item of sale.items) {
         if (item.productId.startsWith('custom-')) continue;
         try {
-          const prodRef = doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'products', item.productId);
+          const prodRef = doc(db, 'businesses', businessId, 'products', item.productId);
           await updateDoc(prodRef, {
             currentStock: increment(-item.quantity),
             updatedAt: new Date().toISOString()
+          });
+
+          // 3. Record stock movement entry in inventory history
+          const movId = `mov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          const movRef = doc(db, 'businesses', businessId, 'stockMovements', movId);
+          await setDoc(movRef, {
+            id: movId,
+            productId: item.productId,
+            productName: item.productName,
+            previousStock: 0,
+            addedQty: -item.quantity,
+            newStock: 0,
+            date: sale.date,
+            time: sale.time,
+            adminId: sale.cashierId,
+            adminName: sale.cashierName,
+            reason: `POS Sale #${sale.id.slice(-6)}${item.barcode ? ` [Barcode: ${item.barcode}]` : ''}`,
+            createdAt: Date.now()
           });
         } catch (stockErr) {
           console.warn(`Could not decrement stock online for ${item.productId}:`, stockErr);

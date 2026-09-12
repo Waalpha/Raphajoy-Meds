@@ -1,6 +1,7 @@
 import { db, DEFAULT_BUSINESS_ID } from './firebase';
-import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
 import { BusinessConfig, Category, Product, BusinessDay, UserProfile } from '../types';
+import { cacheLocalProducts, cacheLocalCategories } from './offlineManager';
 
 export async function initializeDatabase(currentUser?: { uid: string; email?: string; displayName?: string }) {
   try {
@@ -48,9 +49,12 @@ export async function initializeDatabase(currentUser?: { uid: string; email?: st
         { id: 'cat-personal', name: 'Personal Care & Hygiene', description: 'Antiseptic soaps, hand sanitizers & oral care' },
         { id: 'cat-baby', name: 'Baby Care & Maternity', description: 'Baby formula, diapers, teething gels & aqueous cream' }
       ];
+      const catBatch = writeBatch(db);
       for (const cat of defaultCategories) {
-        await setDoc(doc(catColRef, cat.id), cat);
+        catBatch.set(doc(catColRef, cat.id), cat);
       }
+      await catBatch.commit();
+      cacheLocalCategories(defaultCategories);
     }
 
     // 3. Check/Create Products & Force Reset Food Items to Pharmacy
@@ -420,8 +424,9 @@ export async function forceResetDatabaseToPharmacy() {
     // Re-seed categories
     const catColRef = collection(db, 'businesses', DEFAULT_BUSINESS_ID, 'categories');
     const existingCats = await getDocs(catColRef);
+    const catBatch = writeBatch(db);
     for (const d of existingCats.docs) {
-      await deleteDoc(d.ref);
+      catBatch.delete(d.ref);
     }
 
     const defaultCategories: Category[] = [
@@ -435,14 +440,17 @@ export async function forceResetDatabaseToPharmacy() {
       { id: 'cat-baby', name: 'Baby Care & Maternity', description: 'Baby formula, diapers, teething gels & aqueous cream' }
     ];
     for (const cat of defaultCategories) {
-      await setDoc(doc(catColRef, cat.id), cat);
+      catBatch.set(doc(catColRef, cat.id), cat);
     }
+    await catBatch.commit();
+    cacheLocalCategories(defaultCategories);
 
     // Re-seed products
     const prodColRef = collection(db, 'businesses', DEFAULT_BUSINESS_ID, 'products');
     const existingProds = await getDocs(prodColRef);
+    const prodBatch = writeBatch(db);
     for (const d of existingProds.docs) {
-      await deleteDoc(d.ref);
+      prodBatch.delete(d.ref);
     }
 
     const defaultProducts: Product[] = [
@@ -451,6 +459,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Paracetamol 500mg Tablets (Pack of 100)',
         categoryId: 'cat-pain',
         categoryName: 'Analgesics & Pain Relief',
+        barcode: '6161100100015',
+        barcodeType: 'EAN13',
         unitType: 'Pack',
         buyingPrice: 250,
         sellingPrice: 450,
@@ -467,6 +477,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Ibuprofen 400mg Tablets (Box of 50)',
         categoryId: 'cat-pain',
         categoryName: 'Analgesics & Pain Relief',
+        barcode: '6161100100022',
+        barcodeType: 'EAN13',
         unitType: 'Box',
         buyingPrice: 350,
         sellingPrice: 600,
@@ -483,6 +495,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Amoxicillin 500mg Capsules (Box of 100)',
         categoryId: 'cat-prescription',
         categoryName: 'Prescription Drugs (Rx)',
+        barcode: '6161100100039',
+        barcodeType: 'EAN13',
         unitType: 'Box',
         buyingPrice: 800,
         sellingPrice: 1400,
@@ -499,6 +513,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Augmentin 625mg Tablets (Strip of 14)',
         categoryId: 'cat-prescription',
         categoryName: 'Prescription Drugs (Rx)',
+        barcode: '6161100100046',
+        barcodeType: 'EAN13',
         unitType: 'Strip',
         buyingPrice: 650,
         sellingPrice: 1100,
@@ -515,6 +531,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Benylin Chesty Cough Syrup 100ml',
         categoryId: 'cat-cold',
         categoryName: 'Cold, Flu & Cough',
+        barcode: '6161100100053',
+        barcodeType: 'EAN13',
         unitType: 'Bottle',
         buyingPrice: 300,
         sellingPrice: 550,
@@ -531,6 +549,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Panadol Cold & Flu Relief (Pack of 20)',
         categoryId: 'cat-cold',
         categoryName: 'Cold, Flu & Cough',
+        barcode: '6161100100060',
+        barcodeType: 'EAN13',
         unitType: 'Pack',
         buyingPrice: 180,
         sellingPrice: 320,
@@ -547,6 +567,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Centrum Multivitamin Tablets (Bottle of 60)',
         categoryId: 'cat-vitamins',
         categoryName: 'Vitamins & Supplements',
+        barcode: '6161100100077',
+        barcodeType: 'EAN13',
         unitType: 'Bottle',
         buyingPrice: 1200,
         sellingPrice: 1950,
@@ -563,6 +585,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Vitamin C 1000mg Effervescent (Tube of 20)',
         categoryId: 'cat-vitamins',
         categoryName: 'Vitamins & Supplements',
+        barcode: '6161100100084',
+        barcodeType: 'EAN13',
         unitType: 'Tube',
         buyingPrice: 400,
         sellingPrice: 700,
@@ -579,6 +603,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'First Aid Emergency Kit Box',
         categoryId: 'cat-firstaid',
         categoryName: 'First Aid & Wound Care',
+        barcode: '6161100100091',
+        barcodeType: 'EAN13',
         unitType: 'Piece',
         buyingPrice: 1500,
         sellingPrice: 2500,
@@ -595,6 +621,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Hydrogen Peroxide 200ml & Cotton Wool Set',
         categoryId: 'cat-firstaid',
         categoryName: 'First Aid & Wound Care',
+        barcode: '6161100100107',
+        barcodeType: 'EAN13',
         unitType: 'Set',
         buyingPrice: 150,
         sellingPrice: 280,
@@ -611,6 +639,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Digital Infrared Non-Contact Thermometer',
         categoryId: 'cat-devices',
         categoryName: 'Medical Devices & Equipment',
+        barcode: '6161100100114',
+        barcodeType: 'EAN13',
         unitType: 'Piece',
         buyingPrice: 1200,
         sellingPrice: 2200,
@@ -627,6 +657,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Automatic Upper Arm Blood Pressure Monitor',
         categoryId: 'cat-devices',
         categoryName: 'Medical Devices & Equipment',
+        barcode: '6161100100121',
+        barcodeType: 'EAN13',
         unitType: 'Piece',
         buyingPrice: 3500,
         sellingPrice: 5800,
@@ -643,6 +675,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Blood Glucose Test Strips (Pack of 50)',
         categoryId: 'cat-devices',
         categoryName: 'Medical Devices & Equipment',
+        barcode: '6161100100138',
+        barcodeType: 'EAN13',
         unitType: 'Pack',
         buyingPrice: 1800,
         sellingPrice: 2800,
@@ -659,6 +693,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Dettol Antiseptic Liquid 500ml',
         categoryId: 'cat-personal',
         categoryName: 'Personal Care & Hygiene',
+        barcode: '6161100100145',
+        barcodeType: 'EAN13',
         unitType: 'Bottle',
         buyingPrice: 450,
         sellingPrice: 750,
@@ -675,6 +711,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Alcohol Hand Sanitizer 500ml Pump',
         categoryId: 'cat-personal',
         categoryName: 'Personal Care & Hygiene',
+        barcode: '6161100100152',
+        barcodeType: 'EAN13',
         unitType: 'Bottle',
         buyingPrice: 250,
         sellingPrice: 450,
@@ -691,6 +729,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Sudocrem Healing Antiseptic Cream 250g',
         categoryId: 'cat-baby',
         categoryName: 'Baby Care & Maternity',
+        barcode: '6161100100169',
+        barcodeType: 'EAN13',
         unitType: 'Tub',
         buyingPrice: 700,
         sellingPrice: 1200,
@@ -707,6 +747,8 @@ export async function forceResetDatabaseToPharmacy() {
         name: 'Panadol Children Pediatric Suspension 100ml',
         categoryId: 'cat-baby',
         categoryName: 'Baby Care & Maternity',
+        barcode: '6161100100176',
+        barcodeType: 'EAN13',
         unitType: 'Bottle',
         buyingPrice: 280,
         sellingPrice: 500,
@@ -720,8 +762,10 @@ export async function forceResetDatabaseToPharmacy() {
       }
     ];
     for (const prod of defaultProducts) {
-      await setDoc(doc(prodColRef, prod.id), prod);
+      prodBatch.set(doc(prodColRef, prod.id), prod);
     }
+    await prodBatch.commit();
+    cacheLocalProducts(defaultProducts);
 
     return { success: true };
   } catch (err: any) {

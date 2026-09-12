@@ -42,7 +42,8 @@ export default function App() {
   const [adminTab, setAdminTab] = useState<string>('dashboard');
 
   useEffect(() => {
-    const localUserStr = localStorage.getItem('bar_pos_local_user');
+    // 1. Instant local user check
+    const localUserStr = localStorage.getItem('bar_pos_local_user') || localStorage.getItem('raphajoy_pos_user_profile');
     if (localUserStr) {
       try {
         const localUser = JSON.parse(localUserStr);
@@ -51,7 +52,8 @@ export default function App() {
         } else {
           setUserProfile(localUser);
           setFirebaseUser({ uid: localUser.uid, email: localUser.email } as any);
-          // Fetch business config
+          setLoading(false);
+          // Fetch business config in background
           getDoc(doc(db, 'businesses', DEFAULT_BUSINESS_ID)).then(bizSnap => {
             if (bizSnap.exists()) {
               const data = bizSnap.data() as BusinessConfig;
@@ -59,7 +61,6 @@ export default function App() {
               localStorage.setItem('bar_pos_business_config', JSON.stringify(data));
             }
           }).catch(() => {});
-          setLoading(false);
           return;
         }
       } catch (e) {
@@ -67,30 +68,48 @@ export default function App() {
       }
     }
 
-    const timer = setTimeout(() => {
+    // Safety watchdog: Max 2000ms loading screen timeout so UI never hangs
+    const safetyTimer = setTimeout(() => {
       setLoading(false);
-    }, 2500);
+    }, 2000);
 
     const unsubscribe = onAuthStateChanged(auth, async (fUser) => {
-      clearTimeout(timer);
       if (fUser) {
         setFirebaseUser(fUser);
+        // Non-blocking background database initialization
         initializeDatabase(fUser).catch(() => {});
 
-        // Fetch user profile
+        // Fetch user profile with resilient race condition (max 1500ms timeout)
         try {
           const userDocRef = doc(db, 'users', fUser.uid);
-          const userSnap = await getDoc(userDocRef);
-          if (userSnap.exists()) {
-            setUserProfile(userSnap.data() as UserProfile);
+          const userFetchPromise = getDoc(userDocRef);
+          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+
+          const userSnap = await Promise.race([userFetchPromise, timeoutPromise]);
+
+          if (userSnap && userSnap.exists()) {
+            const data = userSnap.data() as UserProfile;
+            setUserProfile(data);
+            localStorage.setItem('raphajoy_pos_user_profile', JSON.stringify(data));
           } else {
-            // Fallback profile
+            // Check if cached locally
+            const cachedStr = localStorage.getItem('raphajoy_pos_user_profile');
+            if (cachedStr) {
+              try {
+                const cached = JSON.parse(cachedStr);
+                if (cached.uid === fUser.uid) {
+                  setUserProfile(cached);
+                }
+              } catch (e) {}
+            }
+
+            // Create or fallback profile
             const email = fUser.email || '';
             const role = email.includes('cashier') ? 'cashier' : 'admin';
             const profile: UserProfile = {
               uid: fUser.uid,
               email: email,
-              name: fUser.displayName || (role === 'admin' ? 'Master Admin' : 'Bar Cashier'),
+              name: fUser.displayName || (role === 'admin' ? 'Pharmacy Admin' : 'Pharmacy Cashier'),
               role: role,
               businessId: DEFAULT_BUSINESS_ID,
               status: 'active',
@@ -98,28 +117,34 @@ export default function App() {
             };
             setDoc(userDocRef, profile).catch(() => {});
             setUserProfile(profile);
+            localStorage.setItem('raphajoy_pos_user_profile', JSON.stringify(profile));
           }
 
-          // Fetch business config
+          // Fetch business config in background
           const bizRef = doc(db, 'businesses', DEFAULT_BUSINESS_ID);
-          const bizSnap = await getDoc(bizRef);
-          if (bizSnap.exists()) {
-            const data = bizSnap.data() as BusinessConfig;
-            setBusinessConfig(data);
-            localStorage.setItem('bar_pos_business_config', JSON.stringify(data));
-          }
+          getDoc(bizRef).then(bizSnap => {
+            if (bizSnap.exists()) {
+              const data = bizSnap.data() as BusinessConfig;
+              setBusinessConfig(data);
+              localStorage.setItem('bar_pos_business_config', JSON.stringify(data));
+            }
+          }).catch(() => {});
         } catch (err) {
-          console.error("Error loading user profile or business config:", err);
+          console.warn("Could not fetch remote profile immediately, using fallback:", err);
+        } finally {
+          clearTimeout(safetyTimer);
+          setLoading(false);
         }
       } else {
         setFirebaseUser(null);
         setUserProfile(null);
+        clearTimeout(safetyTimer);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => {
-      clearTimeout(timer);
+      clearTimeout(safetyTimer);
       unsubscribe();
     };
   }, []);

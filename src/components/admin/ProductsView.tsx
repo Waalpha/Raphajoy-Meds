@@ -3,25 +3,33 @@ import { UserProfile, BusinessConfig, Product, Category } from '../../types';
 import { db, DEFAULT_BUSINESS_ID } from '../../lib/firebase';
 import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { formatCurrency, logAuditAction } from '../../lib/utils';
-import { Package, Plus, Search, Edit2, Trash2, X, AlertCircle, Download, Upload, Layers } from 'lucide-react';
+import { Package, Plus, Search, Edit2, Trash2, X, AlertCircle, Download, Upload, Layers, Barcode, Printer, Sparkles, Copy, Check } from 'lucide-react';
 import { forceResetDatabaseToPharmacy } from '../../lib/dbSeeder';
+import { BarcodeLabelModal } from '../common/BarcodeLabelModal';
+import { validateBarcode, generateUniqueBarcode, renderBarcodeSvg, BarcodeFormat } from '../../lib/barcodeUtils';
 
 interface ProductsViewProps {
   user: UserProfile;
   businessConfig?: BusinessConfig | null;
+  initialBarcode?: string;
+  initialOpenAdd?: boolean;
 }
 
-export function ProductsView({ user, businessConfig }: ProductsViewProps) {
+export function ProductsView({ user, businessConfig, initialBarcode, initialOpenAdd }: ProductsViewProps) {
+  const businessId = user.businessId || DEFAULT_BUSINESS_ID;
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const barcodePreviewRef = useRef<SVGSVGElement | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [selectedProductForBarcode, setSelectedProductForBarcode] = useState<Product | null>(null);
+  const [copiedBarcode, setCopiedBarcode] = useState<string | null>(null);
   const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
   const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('');
   const [isDeletingAll, setIsDeletingAll] = useState(false);
@@ -34,6 +42,8 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
 
   const [formData, setFormData] = useState({
     name: '',
+    barcode: '',
+    barcodeType: 'CODE128' as BarcodeFormat,
     categoryId: '',
     unitType: 'Bottle' as Product['unitType'],
     buyingPrice: 0,
@@ -46,11 +56,29 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
 
   useEffect(() => {
     fetchProductsAndCategories();
-  }, []);
+  }, [businessId]);
+
+  useEffect(() => {
+    if (initialOpenAdd) {
+      handleOpenAddModal(initialBarcode);
+    }
+  }, [initialOpenAdd, initialBarcode]);
+
+  // Live render barcode preview inside form
+  useEffect(() => {
+    if (isModalOpen && formData.barcode && barcodePreviewRef.current) {
+      renderBarcodeSvg(barcodePreviewRef.current, formData.barcode, formData.barcodeType, {
+        width: 1.5,
+        height: 38,
+        displayValue: true,
+        fontSize: 12
+      });
+    }
+  }, [isModalOpen, formData.barcode, formData.barcodeType]);
 
   async function fetchProductsAndCategories() {
     try {
-      const prodRef = collection(db, 'businesses', DEFAULT_BUSINESS_ID, 'products');
+      const prodRef = collection(db, 'businesses', businessId, 'products');
       const prodSnap = await getDocs(prodRef);
       const prods: Product[] = [];
       prodSnap.forEach(d => {
@@ -69,7 +97,7 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
 
       setProducts(prods);
 
-      const catRef = collection(db, 'businesses', DEFAULT_BUSINESS_ID, 'categories');
+      const catRef = collection(db, 'businesses', businessId, 'categories');
       const catSnap = await getDocs(catRef);
       const cats: Category[] = [];
       catSnap.forEach(d => {
@@ -145,9 +173,9 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
       const newCat: Category = {
         id: catId,
         name: newCatName.trim(),
-        description: newCatDesc.trim() || 'Hotel category'
+        description: newCatDesc.trim() || 'Pharmacy category'
       };
-      await setDoc(doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'categories', catId), newCat);
+      await setDoc(doc(db, 'businesses', businessId, 'categories', catId), newCat);
       const updatedCats = [...categories, newCat];
       setCategories(updatedCats);
       localStorage.setItem('bar_pos_local_categories', JSON.stringify(updatedCats));
@@ -168,7 +196,7 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
     }
     if (!window.confirm(`Are you sure you want to delete category "${cat.name}"?`)) return;
     try {
-      await deleteDoc(doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'categories', cat.id));
+      await deleteDoc(doc(db, 'businesses', businessId, 'categories', cat.id));
       const updatedCats = categories.filter(c => c.id !== cat.id);
       setCategories(updatedCats);
       localStorage.setItem('bar_pos_local_categories', JSON.stringify(updatedCats));
@@ -184,16 +212,18 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
       alert("No products to export.");
       return;
     }
-    const headers = ['id', 'name', 'categoryId', 'categoryName', 'unitType', 'buyingPrice', 'sellingPrice', 'openingStock', 'currentStock', 'minStockLevel'];
+    const headers = ['id', 'name', 'barcode', 'barcodeType', 'categoryId', 'categoryName', 'unitType', 'buyingPrice', 'sellingPrice', 'openingStock', 'currentStock', 'minStockLevel'];
     const csvRows = [headers.join(',')];
 
     products.forEach(p => {
       const row = [
         p.id,
         `"${(p.name || '').replace(/"/g, '""')}"`,
-        p.categoryId || 'cat-beer',
-        `"${(p.categoryName || 'Beers').replace(/"/g, '""')}"`,
-        p.unitType || 'Bottle',
+        `"${(p.barcode || '').replace(/"/g, '""')}"`,
+        p.barcodeType || 'CODE128',
+        p.categoryId || 'cat-pain',
+        `"${(p.categoryName || 'General').replace(/"/g, '""')}"`,
+        p.unitType || 'Pack',
         p.buyingPrice || 0,
         p.sellingPrice || 0,
         p.openingStock || 0,
@@ -231,6 +261,8 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
         // Parse header
         const header = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
         const nameIdx = header.indexOf('name');
+        const barcodeIdx = header.indexOf('barcode');
+        const barcodeTypeIdx = header.indexOf('barcodeType');
         const catIdIdx = header.indexOf('categoryId');
         const catNameIdx = header.indexOf('categoryName');
         const unitIdx = header.indexOf('unitType');
@@ -250,7 +282,6 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
 
         for (let i = 1; i < lines.length; i++) {
           const rowLine = lines[i];
-          // Robust CSV line parser handling commas inside quotes and missing fields
           const cleanRow: string[] = [];
           let currentVal = '';
           let inQuotes = false;
@@ -268,21 +299,34 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
           cleanRow.push(currentVal.trim().replace(/^"|"$/g, ''));
 
           const name = (nameIdx !== -1 && cleanRow[nameIdx]) ? cleanRow[nameIdx] : `Product ${i}`;
-          const categoryId = (catIdIdx !== -1 && cleanRow[catIdIdx]) ? cleanRow[catIdIdx] : categories[0]?.id || 'cat-beer';
-          const categoryName = (catNameIdx !== -1 && cleanRow[catNameIdx]) ? cleanRow[catNameIdx] : 'Beers';
-          const unitType = (unitIdx !== -1 && cleanRow[unitIdx]) ? cleanRow[unitIdx] as Product['unitType'] : 'Bottle';
+          const rawBarcode = (barcodeIdx !== -1 && cleanRow[barcodeIdx]) ? cleanRow[barcodeIdx].trim() : '';
+          const rawBarcodeType = (barcodeTypeIdx !== -1 && cleanRow[barcodeTypeIdx]) ? cleanRow[barcodeTypeIdx].trim() as BarcodeFormat : 'CODE128';
+          const categoryId = (catIdIdx !== -1 && cleanRow[catIdIdx]) ? cleanRow[catIdIdx] : categories[0]?.id || 'cat-pain';
+          const categoryName = (catNameIdx !== -1 && cleanRow[catNameIdx]) ? cleanRow[catNameIdx] : 'General';
+          const unitType = (unitIdx !== -1 && cleanRow[unitIdx]) ? cleanRow[unitIdx] as Product['unitType'] : 'Pack';
           const buyingPrice = (buyIdx !== -1 && !isNaN(Number(cleanRow[buyIdx]))) ? Number(cleanRow[buyIdx]) : 150;
           const sellingPrice = (sellIdx !== -1 && !isNaN(Number(cleanRow[sellIdx]))) ? Number(cleanRow[sellIdx]) : 250;
           const openingStock = (stockIdx !== -1 && !isNaN(Number(cleanRow[stockIdx]))) ? Number(cleanRow[stockIdx]) : 50;
           const minStockLevel = (minIdx !== -1 && !isNaN(Number(cleanRow[minIdx]))) ? Number(cleanRow[minIdx]) : 10;
 
+          // Check for duplicate barcode in already processed items
+          let finalBarcode = rawBarcode;
+          if (finalBarcode) {
+            const isDup = newProds.some(p => p.barcode && p.barcode.toLowerCase() === finalBarcode.toLowerCase());
+            if (isDup) {
+              finalBarcode = ''; // Skip duplicate barcode to preserve uniqueness
+            }
+          }
+
           const productId = 'prod-' + Date.now() + '-' + i;
           const newProd: Product = {
             id: productId,
             name,
+            barcode: finalBarcode || undefined,
+            barcodeType: finalBarcode ? rawBarcodeType : undefined,
             categoryId,
             categoryName,
-            unitType: ['Bottle', 'Cans', 'Tot', 'Pint', 'Pitcher', 'Glass', 'Packet', 'Piece'].includes(unitType) ? unitType : 'Bottle',
+            unitType,
             buyingPrice,
             sellingPrice,
             openingStock,
@@ -295,7 +339,7 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
           };
 
           try {
-            await setDoc(doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'products', productId), newProd);
+            await setDoc(doc(db, 'businesses', businessId, 'products', productId), newProd);
           } catch (err) {
             // Firestore permission fallback
           }
@@ -321,10 +365,9 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
     if (products.length === 0) return;
     setIsDeletingAll(true);
     try {
-      // Delete all products from Firestore
       for (const p of products) {
         try {
-          await deleteDoc(doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'products', p.id));
+          await deleteDoc(doc(db, 'businesses', businessId, 'products', p.id));
         } catch (err) {
           console.warn(`Could not delete product ${p.id} from Firestore`, err);
         }
@@ -342,12 +385,14 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
     }
   };
 
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = (initialCode?: string) => {
     setEditingProduct(null);
     setFormData({
       name: '',
-      categoryId: categories[0]?.id || 'cat-beer',
-      unitType: 'Bottle',
+      barcode: initialCode || '',
+      barcodeType: 'CODE128',
+      categoryId: categories[0]?.id || 'cat-pain',
+      unitType: 'Pack',
       buyingPrice: 150,
       sellingPrice: 250,
       openingStock: 50,
@@ -362,6 +407,8 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
     setEditingProduct(product);
     setFormData({
       name: product.name,
+      barcode: product.barcode != null ? String(product.barcode) : '',
+      barcodeType: product.barcodeType || 'CODE128',
       categoryId: product.categoryId,
       unitType: product.unitType,
       buyingPrice: product.buyingPrice || 0,
@@ -374,11 +421,45 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
     setIsModalOpen(true);
   };
 
+  const handleAutoGenerateBarcode = () => {
+    const existingBarcodes = products
+      .filter(p => p.barcode)
+      .map(p => p.barcode as string);
+    const newCode = generateUniqueBarcode(formData.barcodeType, existingBarcodes);
+    setFormData(prev => ({
+      ...prev,
+      barcode: newCode
+    }));
+  };
+
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) {
       setError('Product name is required');
       return;
+    }
+
+    const trimmedBarcode = (formData.barcode != null ? String(formData.barcode) : '').trim();
+
+    // Barcode validation if provided
+    if (trimmedBarcode) {
+      const valResult = validateBarcode(trimmedBarcode, formData.barcodeType);
+      if (!valResult.valid) {
+        setError(valResult.error || 'Invalid barcode format');
+        return;
+      }
+
+      // Check tenant-wide uniqueness
+      const duplicate = products.find(p =>
+        p.barcode &&
+        String(p.barcode).trim().toLowerCase() === trimmedBarcode.toLowerCase() &&
+        p.id !== editingProduct?.id
+      );
+
+      if (duplicate) {
+        setError(`Barcode "${trimmedBarcode}" is already assigned to "${duplicate.name}". Barcodes must be unique within your pharmacy.`);
+        return;
+      }
     }
 
     try {
@@ -388,9 +469,11 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
 
       if (editingProduct) {
         // Edit
-        const prodRef = doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'products', editingProduct.id);
+        const prodRef = doc(db, 'businesses', businessId, 'products', editingProduct.id);
         const updatedData = {
           name: formData.name.trim(),
+          barcode: trimmedBarcode || undefined,
+          barcodeType: trimmedBarcode ? formData.barcodeType : undefined,
           categoryId: formData.categoryId,
           categoryName,
           unitType: formData.unitType,
@@ -402,13 +485,15 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
           updatedAt: now
         };
         await updateDoc(prodRef, updatedData);
-        await logAuditAction(user.uid, user.name, 'PRODUCT_EDITED', `Updated product ${formData.name}`, editingProduct.id);
+        await logAuditAction(user.uid, user.name, 'PRODUCT_EDITED', `Updated product ${formData.name}${trimmedBarcode ? ` (Barcode: ${trimmedBarcode})` : ''}`, editingProduct.id);
       } else {
         // Create
         const productId = 'prod-' + Date.now();
         const newProduct: Product = {
           id: productId,
           name: formData.name.trim(),
+          barcode: trimmedBarcode || undefined,
+          barcodeType: trimmedBarcode ? formData.barcodeType : undefined,
           categoryId: formData.categoryId,
           categoryName,
           unitType: formData.unitType,
@@ -422,9 +507,9 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
           createdAt: now,
           updatedAt: now
         };
-        const prodRef = doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'products', productId);
+        const prodRef = doc(db, 'businesses', businessId, 'products', productId);
         await setDoc(prodRef, newProduct);
-        await logAuditAction(user.uid, user.name, 'PRODUCT_CREATED', `Created product ${formData.name}`, productId);
+        await logAuditAction(user.uid, user.name, 'PRODUCT_CREATED', `Created product ${formData.name}${trimmedBarcode ? ` (Barcode: ${trimmedBarcode})` : ''}`, productId);
       }
 
       setIsModalOpen(false);
@@ -439,7 +524,7 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
     if (!window.confirm(`Are you sure you want to delete ${product.name}?`)) return;
 
     try {
-      await deleteDoc(doc(db, 'businesses', DEFAULT_BUSINESS_ID, 'products', product.id));
+      await deleteDoc(doc(db, 'businesses', businessId, 'products', product.id));
       await logAuditAction(user.uid, user.name, 'PRODUCT_DELETED', `Deleted product ${product.name}`, product.id);
       await fetchProductsAndCategories();
     } catch (err: any) {
@@ -585,6 +670,7 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50 text-xs font-bold uppercase tracking-wider text-gray-500">
                   <th className="p-4">Product Name</th>
+                  <th className="p-4">Barcode</th>
                   <th className="p-4">Category</th>
                   <th className="p-4">Unit</th>
                   <th className="p-4 text-right">Selling Price</th>
@@ -598,6 +684,33 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
                   <tr key={product.id} className="hover:bg-gray-50/80 transition-colors">
                     <td className="p-4 font-bold text-gray-900">{product.name}</td>
                     <td className="p-4">
+                      {product.barcode ? (
+                        <div className="inline-flex items-center space-x-1.5">
+                          <span className="font-mono text-xs font-semibold bg-slate-100 text-slate-800 px-2 py-1 rounded-md border border-slate-200 tracking-wider">
+                            {product.barcode}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(String(product.barcode || ''));
+                              setCopiedBarcode(product.id);
+                              setTimeout(() => setCopiedBarcode(null), 1500);
+                            }}
+                            className="text-slate-400 hover:text-slate-600 p-1 rounded"
+                            title="Copy Barcode"
+                          >
+                            {copiedBarcode === product.id ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">No barcode</span>
+                      )}
+                    </td>
+                    <td className="p-4">
                       <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
                         {product.categoryName}
                       </span>
@@ -609,6 +722,13 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
                     <td className="p-4 text-center font-medium text-gray-700">{product.openingStock}</td>
                     <td className="p-4 text-center font-bold text-gray-900">{product.currentStock}</td>
                     <td className="p-4 text-right space-x-2">
+                      <button
+                        onClick={() => setSelectedProductForBarcode(product)}
+                        className="p-2 rounded-xl bg-purple-50 text-purple-700 hover:bg-purple-100 transition-all"
+                        title="Print Barcode Labels"
+                      >
+                        <Barcode className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => handleOpenEditModal(product)}
                         className="p-2 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all"
@@ -668,6 +788,72 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
                   placeholder="e.g. Paracetamol 500mg (Pack of 100)"
                   className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
                 />
+              </div>
+
+              {/* Barcode Field with Auto-Generate & Format Selector */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/90 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center space-x-1.5 text-xs font-bold uppercase tracking-wider text-slate-700">
+                    <Barcode className="w-4 h-4 text-emerald-600" />
+                    <span>Barcode / Scan Code</span>
+                  </label>
+                  <div className="flex items-center space-x-1.5">
+                    <select
+                      value={formData.barcodeType}
+                      onChange={(e) => setFormData({ ...formData, barcodeType: e.target.value as BarcodeFormat })}
+                      className="text-xs font-semibold bg-white border border-gray-300 rounded-lg px-2 py-1 text-gray-700 focus:outline-none"
+                    >
+                      <option value="CODE128">Code 128 (Alphanumeric)</option>
+                      <option value="EAN13">EAN-13 (Standard Retail)</option>
+                      <option value="UPC">UPC-A (12-digit)</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAutoGenerateBarcode}
+                      className="inline-flex items-center space-x-1 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-1 rounded-lg transition"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Auto</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={formData.barcode}
+                    onChange={(e) => setFormData({ ...formData, barcode: e.target.value.trim() })}
+                    placeholder="Enter or scan barcode (e.g. 6161100100015 or MED-1001)"
+                    className="w-full font-mono rounded-xl border border-gray-300 bg-white p-2.5 text-sm tracking-wide text-gray-900 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
+                  />
+                </div>
+
+                {formData.barcode && (
+                  <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-[10px] uppercase font-bold text-slate-400">Preview:</span>
+                      <svg ref={barcodePreviewRef} className="max-h-11 w-auto" />
+                    </div>
+                    {editingProduct && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedProductForBarcode({
+                            ...editingProduct,
+                            barcode: formData.barcode,
+                            barcodeType: formData.barcodeType,
+                            name: formData.name || editingProduct.name,
+                            sellingPrice: formData.sellingPrice || editingProduct.sellingPrice
+                          });
+                        }}
+                        className="text-xs font-semibold text-purple-700 hover:text-purple-800 flex items-center space-x-1 px-2 py-1 rounded hover:bg-purple-50 transition"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Print Label</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -967,6 +1153,16 @@ export function ProductsView({ user, businessConfig }: ProductsViewProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Barcode Label Printing & Preview Modal */}
+      {selectedProductForBarcode && (
+        <BarcodeLabelModal
+          product={selectedProductForBarcode}
+          businessName={businessConfig?.name}
+          currency={currency}
+          onClose={() => setSelectedProductForBarcode(null)}
+        />
       )}
     </div>
   );
